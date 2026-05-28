@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>Now Playing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --c1: #1a1a2e; --c2: #16213e; --c3: #0f3460;
+    --accent: #1db954;
+    --transition: 1.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    font-family: 'Figtree', sans-serif;
+    background: #0d0d0d;
+    -webkit-app-region: drag;
+    cursor: default;
+    user-select: none;
+  }
+
+  /* ── BACKGROUND ── */
+  #bg {
+    position: fixed; inset: 0; z-index: 0;
+    transition: background var(--transition);
+  }
+  #bg::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 80% 60% at 30% 20%, var(--c1) 0%, transparent 70%),
+                radial-gradient(ellipse 60% 80% at 70% 80%, var(--c2) 0%, transparent 70%),
+                radial-gradient(ellipse 100% 100% at 50% 50%, var(--c3) 0%, transparent 100%);
+    transition: all var(--transition);
+    opacity: 0.9;
+  }
+  #bg::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.45);
+  }
+
+  /* grain overlay */
+  #grain {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  #app {
+    position: relative; z-index: 2;
+    width: 100%; height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 0 24px;
+  }
+
+  /* ── LOGIN SCREEN ── */
+  #login-screen {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 32px; text-align: center;
+  }
+  .spotify-logo {
+    width: 52px; height: 52px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .spotify-logo svg { width: 30px; height: 30px; fill: #000; }
+  .login-title {
+    font-size: 28px; font-weight: 700; color: #fff;
+    letter-spacing: -0.5px; line-height: 1.2;
+  }
+  .login-sub {
+    font-size: 14px; color: rgba(255,255,255,0.5);
+    max-width: 280px; line-height: 1.6; margin-top: -16px;
+  }
+  .login-btn {
+    -webkit-app-region: no-drag;
+    padding: 14px 40px; border: none; border-radius: 50px;
+    background: var(--accent); color: #000;
+    font-family: 'Figtree', sans-serif;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.02em;
+    transition: transform 0.15s, background 0.2s, box-shadow 0.2s;
+    box-shadow: 0 8px 32px rgba(29,185,84,0.35);
+  }
+  .login-btn:hover { transform: scale(1.04); background: #1ed760; box-shadow: 0 12px 40px rgba(29,185,84,0.5); }
+  .login-btn:active { transform: scale(0.97); }
+  .client-id-wrap {
+    display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 320px;
+  }
+  .client-id-wrap label { font-size: 11px; color: rgba(255,255,255,0.4); letter-spacing: 0.08em; text-transform: uppercase; text-align: left; }
+  .client-id-input {
+    -webkit-app-region: no-drag;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 12px 14px;
+    color: #fff; font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; outline: none; width: 100%;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .client-id-input::placeholder { color: rgba(255,255,255,0.25); }
+  .client-id-input:focus { border-color: var(--accent); background: rgba(255,255,255,0.1); }
+
+  /* ── PLAYER ── */
+  #player-screen { display: none; width: 100%; max-width: 360px; }
+
+  /* top bar */
+  .top-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 36px;
+  }
+  .context-label {
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255,255,255,0.4); font-weight: 500;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .context-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+  .clock {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; color: rgba(255,255,255,0.5);
+    letter-spacing: 0.04em;
+  }
+
+  /* album art */
+  .art-container {
+    width: 100%; aspect-ratio: 1;
+    border-radius: 16px; overflow: hidden;
+    margin-bottom: 28px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.4);
+    position: relative;
+    transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+  }
+  .art-container.playing { animation: none; }
+  .art-container.paused { transform: scale(0.95); }
+  #album-img {
+    width: 100%; height: 100%; object-fit: cover;
+    display: block;
+    transition: opacity 0.4s ease;
+  }
+  .art-placeholder {
+    width: 100%; height: 100%;
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .art-placeholder svg { width: 60px; height: 60px; opacity: 0.2; fill: #fff; }
+
+  /* track info */
+  .track-info {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 20px; gap: 12px;
+  }
+  .track-text { flex: 1; min-width: 0; }
+  .track-name {
+    font-size: 20px; font-weight: 700; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    letter-spacing: -0.3px; line-height: 1.2; margin-bottom: 5px;
+  }
+  .track-artist {
+    font-size: 14px; color: rgba(255,255,255,0.55);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .heart-btn {
+    -webkit-app-region: no-drag;
+    background: none; border: none; cursor: pointer;
+    padding: 4px; color: rgba(255,255,255,0.3);
+    font-size: 20px; transition: color 0.2s, transform 0.2s;
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .heart-btn.liked { color: var(--accent); }
+  .heart-btn:hover { transform: scale(1.2); }
+
+  /* progress */
+  .progress-wrap { margin-bottom: 20px; }
+  .progress-track {
+    -webkit-app-region: no-drag;
+    width: 100%; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.15);
+    cursor: pointer; position: relative; overflow: visible;
+    margin-bottom: 8px;
+  }
+  .progress-track::after {
+    content: '';
+    position: absolute; inset: -6px 0;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 2px;
+    background: #fff; position: relative;
+    transition: width 0.8s linear;
+    pointer-events: none;
+  }
+  .progress-fill::after {
+    content: ''; position: absolute;
+    right: -5px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #fff; opacity: 0;
+    transition: opacity 0.2s;
+    box-shadow: 0 0 8px rgba(255,255,255,0.5);
+  }
+  .progress-track:hover .progress-fill::after { opacity: 1; }
+  .time-row {
+    display: flex; justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: rgba(255,255,255,0.35);
+  }
+
+  /* controls */
+  .controls {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .ctrl {
+    -webkit-app-region: no-drag;
+    background: none; border: none; cursor: pointer;
+    color: rgba(255,255,255,0.5); padding: 8px;
+    border-radius: 50%; display: flex;
+    transition: color 0.2s, background 0.2s, transform 0.15s;
+  }
+  .ctrl:hover { color: #fff; background: rgba(255,255,255,0.08); transform: scale(1.1); }
+  .ctrl:active { transform: scale(0.93); }
+  .ctrl.active { color: var(--accent); }
+  .ctrl svg { width: 20px; height: 20px; fill: currentColor; }
+  .ctrl.sm svg { width: 17px; height: 17px; }
+
+  .play-pause {
+    -webkit-app-region: no-drag;
+    width: 58px; height: 58px; border-radius: 50%;
+    background: #fff; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    transition: transform 0.15s, background 0.2s;
+  }
+  .play-pause svg { width: 22px; height: 22px; fill: #000; margin-left: 2px; }
+  .play-pause.paused svg { margin-left: 0; }
+  .play-pause:hover { transform: scale(1.06); }
+  .play-pause:active { transform: scale(0.95); }
+
+  /* volume */
+  .volume-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .vol-icon { color: rgba(255,255,255,0.35); display: flex; }
+  .vol-icon svg { width: 16px; height: 16px; fill: currentColor; }
+  .vol-track {
+    -webkit-app-region: no-drag;
+    flex: 1; height: 3px; border-radius: 2px;
+    background: rgba(255,255,255,0.15); cursor: pointer;
+    position: relative;
+  }
+  .vol-fill { height: 100%; border-radius: 2px; background: rgba(255,255,255,0.6); width: 70%; }
+
+  /* idle / no playback */
+  .idle-msg {
+    text-align: center; padding: 40px 0;
+  }
+  .idle-msg p { color: rgba(255,255,255,0.35); font-size: 14px; }
+
+  /* logout */
+  .logout-btn {
+    -webkit-app-region: no-drag;
+    position: fixed; bottom: 20px; right: 20px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 6px 12px;
+    color: rgba(255,255,255,0.3); font-size: 11px;
+    font-family: 'Figtree', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+    letter-spacing: 0.04em;
+  }
+  .logout-btn:hover { color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.1); }
+
+  /* fade transition */
+  .fade-in { animation: fadeIn 0.5s ease forwards; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+<div id="grain"></div>
+
+<div id="app">
+
+  <!-- LOGIN -->
+  <div id="login-screen">
+    <div class="spotify-logo">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424a.623.623 0 01-.857.208c-2.348-1.435-5.304-1.76-8.785-.964a.623.623 0 11-.277-1.215c3.809-.87 7.076-.496 9.712 1.115a.623.623 0 01.207.856zm1.223-2.723a.78.78 0 01-1.072.257C14.1 12.298 11.304 11.62 7.8 12.625a.78.78 0 01-.448-1.493c3.934-1.181 7.17-.518 9.82 1.01a.78.78 0 01.637-.54zm.105-2.835C15.19 9.195 11.172 9.007 8.15 9.9a.937.937 0 11-.543-1.794c3.483-1.056 9.276-.852 12.934 1.389a.937.937 0 01-.627 1.371z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="login-title">Your music.<br/>Your colours.</div>
+    </div>
+    <p class="login-sub">Paste your Spotify Client ID below then connect. You only need to do this once.</p>
+    <div class="client-id-wrap">
+      <label>Spotify Client ID</label>
+      <input class="client-id-input" id="client-id-input" type="text" placeholder="e.g. 4b3f2a1c..." autocomplete="off" spellcheck="false" />
+    </div>
+    <button class="login-btn" id="login-btn">Connect to Spotify</button>
+  </div>
+
+  <!-- PLAYER -->
+  <div id="player-screen">
+    <div class="top-bar">
+      <div class="context-label">
+        <div class="context-dot"></div>
+        <span id="context-text">Spotify</span>
+      </div>
+      <div class="clock" id="clock">--:--</div>
+    </div>
+
+    <div class="art-container" id="art-container">
+      <img id="album-img" src="" alt="Album art" style="display:none" />
+      <div class="art-placeholder" id="art-placeholder">
+        <svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1014 17V7h4V3h-6z"/></svg>
+      </div>
+    </div>
+
+    <div class="track-info">
+      <div class="track-text">
+        <div class="track-name" id="track-name">Nothing playing</div>
+        <div class="track-artist" id="track-artist">Open Spotify to start</div>
+      </div>
+      <button class="heart-btn" id="heart-btn" aria-label="Save to Liked Songs">
+        <svg id="heart-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="progress-wrap">
+      <div class="progress-track" id="progress-track">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <div class="time-row">
+        <span id="time-cur">0:00</span>
+        <span id="time-tot">0:00</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <!-- Shuffle -->
+      <button class="ctrl sm" id="shuffle-btn" aria-label="Shuffle">
+        <svg viewBox="0 0 24 24"><path d="M16 3h5v5l-1.8-1.8-4.2 4.2-1.4-1.4 4.2-4.2L16 3zM4 7l3.5 3.5 1.4-1.4L5.4 5.6 7 4H2v5l2-2zm0 10h2l8.1-8.1 1.4 1.4L7 19H4v-2zm12 0l-1.8 1.8L16 21h5v-5l-1.8 1.8-4.2-4.2-1.4 1.4 4.2 4.2z"/></svg>
+      </button>
+      <!-- Prev -->
+      <button class="ctrl" id="prev-btn" aria-label="Previous">
+        <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+      </button>
+      <!-- Play/Pause -->
+      <button class="play-pause" id="play-btn" aria-label="Play or Pause">
+        <svg id="play-icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <!-- Next -->
+      <button class="ctrl" id="next-btn" aria-label="Next">
+        <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
+      </button>
+      <!-- Repeat -->
+      <button class="ctrl sm" id="repeat-btn" aria-label="Repeat">
+        <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+      </button>
+    </div>
+
+    <div class="volume-row">
+      <div class="vol-icon">
+        <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+      </div>
+      <div class="vol-track" id="vol-track"><div class="vol-fill" id="vol-fill"></div></div>
+      <div class="vol-icon">
+        <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<button class="logout-btn" id="logout-btn" style="display:none">disconnect</button>
+
+<!-- hidden canvas for colour extraction -->
+<canvas id="color-canvas" style="display:none" width="50" height="50"></canvas>
+
+<script>
+// ─────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+const SCOPES = [
+  'user-read-playback-state',
+  'user-modify-playback-state',
+  'user-read-currently-playing',
+  'user-library-read',
+  'user-library-modify'
+].join(' ');
+
+// ─────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────
+let accessToken = null;
+let refreshToken = null;
+let clientId = null;
+let pollTimer = null;
+let clockTimer = null;
+let progressTimer = null;
+let currentTrackId = null;
+let isPlaying = false;
+let durationMs = 0;
+let progressMs = 0;
+let volume = 70;
+let shuffle = false;
+let repeat = 'off';
+let liked = false;
+let lastArtUrl = '';
+
+const $id = id => document.getElementById(id);
+
+// ─────────────────────────────────────────
+// PKCE HELPERS
+// ─────────────────────────────────────────
+function generateRandom(length) {
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const arr = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(arr, b => possible[b % possible.length]).join('');
+}
+
+async function sha256(plain) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  return crypto.subtle.digest('SHA-256', data);
+}
+
+function base64urlEncode(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function startAuth() {
+  clientId = $id('client-id-input').value.trim();
+  if (!clientId || clientId.length < 20) {
+    $id('client-id-input').style.borderColor = '#e74c3c';
+    $id('client-id-input').placeholder = 'Please enter a valid Client ID';
+    return;
+  }
+  localStorage.setItem('sp_client_id', clientId);
+
+  const verifier = generateRandom(64);
+  const challenge = base64urlEncode(await sha256(verifier));
+  const state = generateRandom(16);
+
+  localStorage.setItem('sp_verifier', verifier);
+  localStorage.setItem('sp_state', state);
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+    state: state,
+    scope: SCOPES
+  });
+
+  window.location.href = 'https://accounts.spotify.com/authorize?' + params;
+}
+
+async function exchangeToken(code) {
+  clientId = localStorage.getItem('sp_client_id');
+  const verifier = localStorage.getItem('sp_verifier');
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    grant_type: 'authorization_code',
+    code: code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier
+  });
+
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+
+  if (!res.ok) { console.error('Token exchange failed:', await res.text()); return; }
+  const data = await res.json();
+  storeTokens(data);
+  // Clean URL
+  window.history.replaceState({}, '', window.location.pathname);
+}
+
+async function refreshAccessToken() {
+  const rToken = localStorage.getItem('sp_refresh_token');
+  clientId = localStorage.getItem('sp_client_id');
+  if (!rToken || !clientId) { logout(); return; }
+
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: rToken,
+    client_id: clientId
+  });
+
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+
+  if (!res.ok) { logout(); return; }
+  const data = await res.json();
+  storeTokens(data);
+}
+
+function storeTokens(data) {
+  accessToken = data.access_token;
+  if (data.refresh_token) refreshToken = data.refresh_token;
+  localStorage.setItem('sp_access_token', accessToken);
+  if (data.refresh_token) localStorage.setItem('sp_refresh_token', data.refresh_token);
+  const expiry = Date.now() + (data.expires_in - 60) * 1000;
+  localStorage.setItem('sp_expiry', expiry);
+}
+
+function isTokenExpired() {
+  const expiry = localStorage.getItem('sp_expiry');
+  return !expiry || Date.now() > parseInt(expiry);
+}
+
+async function ensureToken() {
+  if (isTokenExpired()) await refreshAccessToken();
+  accessToken = localStorage.getItem('sp_access_token');
+}
+
+// ─────────────────────────────────────────
+// SPOTIFY API
+// ─────────────────────────────────────────
+async function apiGet(path) {
+  await ensureToken();
+  const res = await fetch('https://api.spotify.com/v1' + path, {
+    headers: { Authorization: 'Bearer ' + accessToken }
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function apiPut(path, body) {
+  await ensureToken();
+  const opts = {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + accessToken }
+  };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  return fetch('https://api.spotify.com/v1' + path, opts);
+}
+
+async function apiPost(path, body) {
+  await ensureToken();
+  const opts = {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken }
+  };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  return fetch('https://api.spotify.com/v1' + path, opts);
+}
+
+// ─────────────────────────────────────────
+// COLOUR EXTRACTION
+// ─────────────────────────────────────────
+function extractColours(imgUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = $id('color-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, 50, 50);
+      const data = ctx.getImageData(0, 0, 50, 50).data;
+
+      // Sample pixels and cluster
+      const pixels = [];
+      for (let i = 0; i < data.length; i += 16) {
+        const r = data[i], g = data[i+1], b = data[i+2];
+        const brightness = (r + g + b) / 3;
+        // skip very dark and very bright pixels for more interesting colours
+        if (brightness > 20 && brightness < 230) pixels.push([r, g, b]);
+      }
+
+      if (pixels.length === 0) { resolve(['#1a1a2e','#16213e','#0f3460']); return; }
+
+      // Simple k-means with k=3
+      let centres = [
+        pixels[0],
+        pixels[Math.floor(pixels.length/2)],
+        pixels[pixels.length-1]
+      ];
+
+      for (let iter = 0; iter < 8; iter++) {
+        const clusters = [[], [], []];
+        for (const p of pixels) {
+          let best = 0, bestDist = Infinity;
+          for (let k = 0; k < 3; k++) {
+            const d = (p[0]-centres[k][0])**2 + (p[1]-centres[k][1])**2 + (p[2]-centres[k][2])**2;
+            if (d < bestDist) { bestDist = d; best = k; }
+          }
+          clusters[best].push(p);
+        }
+        centres = clusters.map(c => {
+          if (c.length === 0) return [40,40,60];
+          return [
+            Math.round(c.reduce((s,p)=>s+p[0],0)/c.length),
+            Math.round(c.reduce((s,p)=>s+p[1],0)/c.length),
+            Math.round(c.reduce((s,p)=>s+p[2],0)/c.length)
+          ];
+        });
+      }
+
+      // Darken centres so they work as backgrounds (reduce brightness by ~40%)
+      const darken = ([r,g,b]) => {
+        const factor = 0.45;
+        return `rgb(${Math.round(r*factor)},${Math.round(g*factor)},${Math.round(b*factor)})`;
+      };
+
+      resolve(centres.map(darken));
+    };
+    img.onerror = () => resolve(['#1a1a2e','#16213e','#0f3460']);
+    img.src = imgUrl;
+  });
+}
+
+function applyGradient(colours) {
+  const [c1, c2, c3] = colours;
+  const bg = $id('bg');
+  bg.style.background =
+    `radial-gradient(ellipse 90% 70% at 20% 15%, ${c1} 0%, transparent 65%),
+     radial-gradient(ellipse 70% 90% at 80% 85%, ${c2} 0%, transparent 65%),
+     radial-gradient(ellipse 120% 120% at 50% 50%, ${c3} 0%, transparent 90%),
+     #0d0d0d`;
+}
+
+// ─────────────────────────────────────────
+// PLAYER UI UPDATE
+// ─────────────────────────────────────────
+function formatMs(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+}
+
+function setPlayIcon(playing) {
+  const icon = $id('play-icon');
+  const btn = $id('play-btn');
+  if (playing) {
+    icon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+    btn.classList.remove('paused');
+  } else {
+    icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    btn.classList.add('paused');
+  }
+}
+
+async function checkLiked(trackId) {
+  const data = await apiGet(`/me/tracks/contains?ids=${trackId}`);
+  if (data && data[0] !== undefined) {
+    liked = data[0];
+    updateHeartUI();
+  }
+}
+
+function updateHeartUI() {
+  const btn = $id('heart-btn');
+  const svg = $id('heart-svg');
+  if (liked) {
+    btn.classList.add('liked');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('stroke', 'none');
+  } else {
+    btn.classList.remove('liked');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+  }
+}
+
+async function updatePlayer(data) {
+  if (!data || !data.item) {
+    $id('track-name').textContent = 'Nothing playing';
+    $id('track-artist').textContent = 'Open Spotify to start';
+    $id('album-img').style.display = 'none';
+    $id('art-placeholder').style.display = 'flex';
+    $id('progress-fill').style.width = '0%';
+    $id('time-cur').textContent = '0:00';
+    $id('time-tot').textContent = '0:00';
+    clearInterval(progressTimer);
+    return;
+  }
+
+  const track = data.item;
+  const newId = track.id;
+  isPlaying = data.is_playing;
+  durationMs = track.duration_ms;
+  progressMs = data.progress_ms;
+
+  setPlayIcon(isPlaying);
+  $id('art-container').classList.toggle('paused', !isPlaying);
+
+  // Update context
+  if (data.context && data.context.type) {
+    $id('context-text').textContent = data.context.type === 'playlist' ? 'Playlist' :
+      data.context.type === 'album' ? 'Album' : 'Spotify';
+  }
+
+  // Shuffle / repeat state
+  shuffle = data.shuffle_state;
+  repeat = data.repeat_state;
+  $id('shuffle-btn').classList.toggle('active', shuffle);
+  $id('repeat-btn').classList.toggle('active', repeat !== 'off');
+
+  // Volume
+  if (data.device) {
+    volume = data.device.volume_percent;
+    $id('vol-fill').style.width = volume + '%';
+  }
+
+  // Track changed?
+  if (newId !== currentTrackId) {
+    currentTrackId = newId;
+
+    $id('track-name').textContent = track.name;
+    $id('track-artist').textContent = track.artists.map(a => a.name).join(', ');
+    $id('time-tot').textContent = formatMs(durationMs);
+
+    // Album art + colour extraction
+    const artUrl = track.album.images[0]?.url;
+    if (artUrl && artUrl !== lastArtUrl) {
+      lastArtUrl = artUrl;
+      const img = $id('album-img');
+      img.style.opacity = '0';
+      img.onload = async () => {
+        img.style.opacity = '1';
+        img.style.display = 'block';
+        $id('art-placeholder').style.display = 'none';
+        // Extract real colours from album art
+        const colours = await extractColours(artUrl);
+        applyGradient(colours);
+      };
+      img.src = artUrl;
+    }
+
+    checkLiked(newId);
+
+    // Animate in
+    $id('player-screen').classList.remove('fade-in');
+    void $id('player-screen').offsetWidth;
+    $id('player-screen').classList.add('fade-in');
+  }
+
+  // Progress bar
+  $id('progress-fill').style.width = (progressMs / durationMs * 100) + '%';
+  $id('time-cur').textContent = formatMs(progressMs);
+
+  // Smooth progress locally
+  clearInterval(progressTimer);
+  if (isPlaying) {
+    let local = progressMs;
+    progressTimer = setInterval(() => {
+      local += 1000;
+      if (local > durationMs) local = durationMs;
+      progressMs = local;
+      $id('progress-fill').style.width = (local / durationMs * 100) + '%';
+      $id('time-cur').textContent = formatMs(local);
+    }, 1000);
+  }
+}
+
+// ─────────────────────────────────────────
+// POLLING
+// ─────────────────────────────────────────
+async function poll() {
+  const data = await apiGet('/me/player');
+  updatePlayer(data);
+}
+
+function startPolling() {
+  poll();
+  pollTimer = setInterval(poll, 3000);
+}
+
+// ─────────────────────────────────────────
+// CLOCK
+// ─────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2,'0');
+  const m = String(now.getMinutes()).padStart(2,'0');
+  $id('clock').textContent = h + ':' + m;
+}
+
+// ─────────────────────────────────────────
+// CONTROLS
+// ─────────────────────────────────────────
+$id('play-btn').onclick = async () => {
+  if (isPlaying) {
+    await apiPut('/me/player/pause');
+    isPlaying = false;
+    setPlayIcon(false);
+    $id('art-container').classList.add('paused');
+    clearInterval(progressTimer);
+  } else {
+    await apiPut('/me/player/play');
+    isPlaying = true;
+    setPlayIcon(true);
+    $id('art-container').classList.remove('paused');
+  }
+};
+
+$id('next-btn').onclick = async () => {
+  await apiPost('/me/player/next');
+  clearInterval(progressTimer);
+  setTimeout(poll, 400);
+};
+
+$id('prev-btn').onclick = async () => {
+  await apiPost('/me/player/previous');
+  clearInterval(progressTimer);
+  setTimeout(poll, 400);
+};
+
+$id('shuffle-btn').onclick = async () => {
+  shuffle = !shuffle;
+  await apiPut(`/me/player/shuffle?state=${shuffle}`);
+  $id('shuffle-btn').classList.toggle('active', shuffle);
+};
+
+$id('repeat-btn').onclick = async () => {
+  const states = ['off', 'context', 'track'];
+  const idx = states.indexOf(repeat);
+  repeat = states[(idx + 1) % 3];
+  await apiPut(`/me/player/repeat?state=${repeat}`);
+  $id('repeat-btn').classList.toggle('active', repeat !== 'off');
+};
+
+$id('heart-btn').onclick = async () => {
+  if (!currentTrackId) return;
+  if (liked) {
+    await fetch(`https://api.spotify.com/v1/me/tracks?ids=${currentTrackId}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    liked = false;
+  } else {
+    await apiPut(`/me/tracks?ids=${currentTrackId}`);
+    liked = true;
+  }
+  updateHeartUI();
+};
+
+$id('progress-track').onclick = (e) => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  const posMs = Math.round(pct * durationMs);
+  apiPut(`/me/player/seek?position_ms=${posMs}`);
+  progressMs = posMs;
+  $id('progress-fill').style.width = (pct * 100) + '%';
+  $id('time-cur').textContent = formatMs(posMs);
+};
+
+$id('vol-track').onclick = (e) => {
+  const rect = e.currentTarget.getBoundingClientRect();
+  volume = Math.round(((e.clientX - rect.left) / rect.width) * 100);
+  $id('vol-fill').style.width = volume + '%';
+  apiPut(`/me/player/volume?volume_percent=${volume}`);
+};
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); $id('play-btn').click(); }
+  if (e.code === 'ArrowRight') $id('next-btn').click();
+  if (e.code === 'ArrowLeft') $id('prev-btn').click();
+  if (e.code === 'ArrowUp') { volume = Math.min(100, volume + 5); $id('vol-fill').style.width = volume + '%'; apiPut(`/me/player/volume?volume_percent=${volume}`); }
+  if (e.code === 'ArrowDown') { volume = Math.max(0, volume - 5); $id('vol-fill').style.width = volume + '%'; apiPut(`/me/player/volume?volume_percent=${volume}`); }
+});
+
+// Media Session API (macOS toolbar)
+if ('mediaSession' in navigator) {
+  navigator.mediaSession.setActionHandler('play', () => { if (!isPlaying) $id('play-btn').click(); });
+  navigator.mediaSession.setActionHandler('pause', () => { if (isPlaying) $id('play-btn').click(); });
+  navigator.mediaSession.setActionHandler('nexttrack', () => $id('next-btn').click());
+  navigator.mediaSession.setActionHandler('previoustrack', () => $id('prev-btn').click());
+}
+
+// Logout
+function logout() {
+  localStorage.removeItem('sp_access_token');
+  localStorage.removeItem('sp_refresh_token');
+  localStorage.removeItem('sp_expiry');
+  localStorage.removeItem('sp_client_id');
+  clearInterval(pollTimer);
+  clearInterval(clockTimer);
+  clearInterval(progressTimer);
+  window.location.reload();
+}
+$id('logout-btn').onclick = logout;
+
+// ─────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  const savedState = localStorage.getItem('sp_state');
+  const savedToken = localStorage.getItem('sp_access_token');
+  const savedClient = localStorage.getItem('sp_client_id');
+
+  if (savedClient) {
+    $id('client-id-input').value = savedClient;
+    clientId = savedClient;
+  }
+
+  if (code && state === savedState) {
+    await exchangeToken(code);
+    localStorage.removeItem('sp_state');
+    localStorage.removeItem('sp_verifier');
+  }
+
+  if (localStorage.getItem('sp_access_token')) {
+    // Show player
+    $id('login-screen').style.display = 'none';
+    $id('player-screen').style.display = 'block';
+    $id('logout-btn').style.display = 'block';
+    updateClock();
+    clockTimer = setInterval(updateClock, 1000);
+    startPolling();
+  } else {
+    $id('login-screen').style.display = 'flex';
+    $id('player-screen').style.display = 'none';
+  }
+}
+
+$id('login-btn').onclick = startAuth;
+$id('client-id-input').addEventListener('keydown', e => { if (e.key === 'Enter') startAuth(); });
+
+init();
+</script>
+</body>
+</html>
